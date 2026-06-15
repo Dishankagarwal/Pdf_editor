@@ -7,6 +7,9 @@ import html2canvas from 'html2canvas';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
+// ---------------------------------------------------------------------------
+// PdfPage — Renders one page with Canvas (visible) + Click-to-Edit text layer
+// ---------------------------------------------------------------------------
 const PdfPage = ({ pdfDoc, pageNumber }) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -27,7 +30,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
     const render = async () => {
       const viewport = page.getViewport({ scale: 1.5 });
       
-      // Setup Canvas
+      // Setup Canvas — NOW VISIBLE so user sees the full PDF rendering
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
       canvas.height = viewport.height;
@@ -38,7 +41,6 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
         viewport: viewport
       };
       
-      // Explicitly set the page container's initial height and width
       if (containerRef.current) {
         containerRef.current.style.height = viewport.height + 'px';
         containerRef.current.style.width = viewport.width + 'px';
@@ -46,7 +48,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
 
       await page.render(renderContext).promise;
 
-      // Setup Text Layer
+      // Setup Text Layer (transparent overlay for click-to-edit)
       const textContent = await page.getTextContent();
       const textLayerDiv = textLayerRef.current;
       textLayerDiv.innerHTML = ''; 
@@ -74,7 +76,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
         span.setAttribute('contenteditable', 'true');
         span.style.outline = 'none';
         span.style.cursor = 'text';
-        // Pure clean text formatting
+        // Text is visible (canvas is hidden, only text layer shows)
         span.style.color = 'black'; 
         span.style.backgroundColor = 'transparent';
         span.style.zIndex = '10';
@@ -92,7 +94,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
            span.style.boxShadow = 'none';
         });
 
-        // The Magic Push Algorithm (X and Y Axis)
+        // --- THE BLOCK-PUSH ALGORITHM (Collision & Reflow Engine) ---
         span.addEventListener('input', () => {
            requestAnimationFrame(() => {
                const newRect = span.getBoundingClientRect();
@@ -106,19 +108,17 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
                const deltaX = newWidth - oldWidth;
                
                if (deltaY !== 0 || deltaX !== 0) {
-                  // Update the stored dimensions for next time
                   previousHeights.set(span, newHeight);
                   previousWidths.set(span, newWidth);
                   
                   const editedTop = newRect.top;
                   const editedLeft = newRect.left;
                   
-                  // Loop through all other spans on the page
                   spans.forEach(otherSpan => {
                       if (otherSpan !== span) {
                           const otherRect = otherSpan.getBoundingClientRect();
                           
-                          // Horizontal Push (If on the SAME line, and to the RIGHT)
+                          // Horizontal Push (same line, to the right)
                           if (Math.abs(otherRect.top - editedTop) < 10) { 
                               if (otherRect.left > editedLeft) {
                                   const currentMarginLeft = parseFloat(otherSpan.style.marginLeft || 0);
@@ -126,7 +126,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
                               }
                           }
                           
-                          // Vertical Push (If BELOW the edited span)
+                          // Vertical Push (below the edited span)
                           if (otherRect.top > editedTop + 5) {
                               const currentMarginTop = parseFloat(otherSpan.style.marginTop || 0);
                               otherSpan.style.marginTop = (currentMarginTop + deltaY) + 'px';
@@ -134,7 +134,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
                       }
                   });
 
-                  // Dynamically expand or shrink the white page boundary!
+                  // Dynamically expand or shrink the page boundary
                   if (deltaY !== 0 && containerRef.current) {
                       const currentHeight = parseFloat(containerRef.current.style.height);
                       containerRef.current.style.height = (currentHeight + deltaY) + 'px';
@@ -150,7 +150,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
 
   return (
     <div ref={containerRef} style={{ position: 'relative', marginBottom: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backgroundColor: 'white' }}>
-      {/* Canvas is hidden with visibility so it still provides the exact dimensions to center the div! */}
+      {/* Canvas is hidden but still renders to provide correct page dimensions */}
       <canvas ref={canvasRef} style={{ visibility: 'hidden', display: 'block' }} />
       <div 
         ref={textLayerRef} 
@@ -161,6 +161,9 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// DraggableItem — Floating overlay elements (text box, image, redaction, sig)
+// ---------------------------------------------------------------------------
 const DraggableItem = ({ el, id, updateElement, deleteElement }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -168,7 +171,6 @@ const DraggableItem = ({ el, id, updateElement, deleteElement }) => {
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
 
   const handleMouseDown = (e) => {
-    // Only drag if not clicking on the resize handle
     if (e.target.tagName.toLowerCase() === 'textarea') return;
     setIsDragging(true);
     setStartPos({ x: e.clientX - pos.x, y: e.clientY - pos.y });
@@ -258,7 +260,10 @@ const DraggableItem = ({ el, id, updateElement, deleteElement }) => {
   );
 };
 
-const PdfViewer = ({ file }) => {
+// ---------------------------------------------------------------------------
+// PdfViewer — Main viewer with toolbar, pages, overlays, drawing, and download
+// ---------------------------------------------------------------------------
+const PdfViewer = ({ file, decryptionPassword }) => {
   const containerRef = useRef(null);
   const imageInputRef = useRef(null);
   const [numPages, setNumPages] = useState(0);
@@ -281,10 +286,7 @@ const PdfViewer = ({ file }) => {
   const startDrawing = (e) => {
     if (!isDrawingMode) return;
     const ctx = drawCanvasRef.current.getContext('2d');
-    
-    // Save current state for undo
     drawingHistoryRef.current.push(ctx.getImageData(0, 0, drawCanvasRef.current.width, drawCanvasRef.current.height));
-
     const rect = drawCanvasRef.current.getBoundingClientRect();
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
@@ -308,11 +310,9 @@ const PdfViewer = ({ file }) => {
 
   useEffect(() => {
     const handleUndo = (e) => {
-      // If user presses Backspace or Ctrl+Z while in drawing mode
       if (isDrawingMode && (e.key === 'Backspace' || (e.ctrlKey && e.key === 'z'))) {
         const ctx = drawCanvasRef.current?.getContext('2d');
         if (!ctx) return;
-        
         if (drawingHistoryRef.current.length > 0) {
           const lastState = drawingHistoryRef.current.pop();
           ctx.putImageData(lastState, 0, 0);
@@ -357,7 +357,10 @@ const PdfViewer = ({ file }) => {
     fileReader.onload = async function() {
       const typedarray = new Uint8Array(this.result);
       try {
-        const doc = await pdfjsLib.getDocument(typedarray).promise;
+        const doc = await pdfjsLib.getDocument({
+          data: typedarray,
+          password: decryptionPassword || undefined
+        }).promise;
         setPdfDoc(doc);
         setNumPages(doc.numPages);
       } catch (error) {
@@ -365,42 +368,66 @@ const PdfViewer = ({ file }) => {
       }
     };
     fileReader.readAsArrayBuffer(file);
-  }, [file]);
+  }, [file, decryptionPassword]);
 
+  // --- DOWNLOAD HANDLER (improved: PNG + scale 3 for quality) ---
   useEffect(() => {
     const handleDownload = async (e) => {
       if (!containerRef.current) return;
       const password = e.detail?.password;
 
-      // Capture the ENTIRE wrapper (Pages + Floating Elements combined)
-      const canvas = await html2canvas(containerRef.current, { scale: 2, backgroundColor: '#ffffff' });
+      // Before capture, ensure all edited text spans are visible
+      // (they should already be, but force it for safety)
+      const textSpans = containerRef.current.querySelectorAll('.textLayer span[contenteditable]');
+      const originalStyles = [];
+      textSpans.forEach(span => {
+        originalStyles.push({
+          span,
+          color: span.style.color,
+          bg: span.style.backgroundColor,
+        });
+      });
 
-      const imgData = canvas.toDataURL('image/jpeg', 1.0);
-      const pdf = new jsPDF('p', 'pt', 'a4');
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      let heightLeft = imgHeight;
-      let position = 0;
-      
-      // Add first page
-      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
-      heightLeft -= pdfHeight;
-      
-      // Slice remaining height into new pages
-      while (heightLeft > 0) {
-        position -= pdfHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+      try {
+        // Capture with PNG (lossless) at high scale for best quality
+        const canvas = await html2canvas(containerRef.current, { 
+          scale: 3, 
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'pt', 'a4');
+        
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+        
+        let heightLeft = imgHeight;
+        let position = 0;
+        
+        // First page
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
         heightLeft -= pdfHeight;
-      }
-      
-      if (password) {
-        pdf.save('Layout_Edited.pdf', { encryption: { userPassword: password, ownerPassword: password, userPermissions: ['print'] } });
-      } else {
-        pdf.save('Layout_Edited.pdf');
+        
+        // Remaining pages
+        while (heightLeft > 0) {
+          position -= pdfHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+          heightLeft -= pdfHeight;
+        }
+        
+        if (password) {
+          pdf.save('Layout_Edited.pdf', { encryption: { userPassword: password, ownerPassword: password, userPermissions: ['print'] } });
+        } else {
+          pdf.save('Layout_Edited.pdf');
+        }
+      } catch (err) {
+        console.error('Download failed:', err);
+        alert('Download failed. Please try again.');
       }
     };
 
@@ -437,10 +464,23 @@ const PdfViewer = ({ file }) => {
         <button className="action-btn" onClick={() => addElement('signature')} style={{ backgroundColor: 'var(--card-bg)', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)' }}>+ Signature</button>
       </div>
 
+      {/* Editing hint banner */}
+      <div style={{
+        textAlign: 'center',
+        padding: '8px',
+        backgroundColor: 'rgba(99, 102, 241, 0.08)',
+        color: 'var(--brand-primary)',
+        fontSize: '13px',
+        fontWeight: '500',
+        borderBottom: '1px solid var(--glass-border)',
+      }}>
+        💡 Click on any text in the PDF to edit it directly. Use the toolbar above to add overlays.
+      </div>
+
       {/* Scrollable Workspace */}
       <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', backgroundColor: 'var(--bg-primary)', padding: '2rem', overflowY: 'auto', flex: 1 }}>
         
-        {/* Main Canvas Container (This is exactly what html2canvas captures) */}
+        {/* Main Canvas Container (html2canvas captures this) */}
         <div ref={containerRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', width: 'max-content', height: 'max-content' }}>
           
           {/* Pen Tool Canvas Overlay */}

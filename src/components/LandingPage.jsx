@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import './LandingPage.css';
 
-const LandingPage = ({ onFileSelect, onMultipleFilesSelect }) => {
+const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onInvoiceSelect }) => {
   const singleInputRef = useRef(null);
   const multipleInputRef = useRef(null);
   const currentModeRef = useRef('layout');
@@ -29,6 +29,16 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect }) => {
     e.target.value = ''; 
   };
 
+  const handleToolClick = (tool) => {
+    if (tool.type === 'direct') {
+      if (tool.mode === 'invoice') onInvoiceSelect();
+    } else if (tool.type === 'single') {
+      handleSingleSelect(tool.mode);
+    } else {
+      handleMultipleSelect();
+    }
+  };
+
   const tools = [
     { mode: 'layout', title: 'Layout Editor', desc: 'Add text, images, redactions, signatures, and drawings.', isPro: false, type: 'single' },
     { mode: 'notepad', title: 'AI Notepad', desc: 'Extract raw text and let AI polish your resume instantly.', isPro: true, type: 'single' },
@@ -37,6 +47,7 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect }) => {
     { mode: 'compress', title: 'Compress PDF', desc: 'Reduce file size drastically for easy emailing.', isPro: false, type: 'single' },
     { mode: 'split', title: 'Split / Extract', desc: 'Extract specific pages or split a large document instantly.', isPro: false, type: 'single' },
     { mode: 'watermark', title: 'Batch Watermark', desc: 'Stamp text diagonally across every page simultaneously.', isPro: false, type: 'single' },
+    { mode: 'invoice', title: 'Invoice Generator', desc: 'Create stunning, professional invoices and download as PDF instantly.', isPro: false, type: 'direct', icon: '🧾' },
   ];
 
   const faqs = [
@@ -66,7 +77,7 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect }) => {
             <button 
                key={tool.mode} 
                className={`sidebar-btn ${tool.isPro ? 'pro-btn' : ''}`}
-               onClick={() => tool.type === 'single' ? handleSingleSelect(tool.mode) : handleMultipleSelect()}
+               onClick={() => handleToolClick(tool)}
             >
               {tool.title}
               {tool.isPro && <span className="pro-badge-small">PRO</span>}
@@ -85,7 +96,7 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect }) => {
               <div 
                  key={tool.mode}
                  className={`feature-card ${tool.isPro ? 'pro-card' : ''}`} 
-                 onClick={() => tool.type === 'single' ? handleSingleSelect(tool.mode) : handleMultipleSelect()}
+                 onClick={() => handleToolClick(tool)}
               >
                  {tool.isPro && <div className="pro-badge">PRO</div>}
                  <h3>{tool.title}</h3>

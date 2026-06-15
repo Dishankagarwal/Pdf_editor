@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { jsPDF } from 'jspdf';
 
-const NotepadViewer = ({ file }) => {
+const NotepadViewer = ({ file, decryptionPassword }) => {
   const [extractedText, setExtractedText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showProModal, setShowProModal] = useState(false);
@@ -29,7 +29,10 @@ const NotepadViewer = ({ file }) => {
       fileReader.onload = async function() {
         const typedarray = new Uint8Array(this.result);
         try {
-          const doc = await pdfjsLib.getDocument(typedarray).promise;
+          const doc = await pdfjsLib.getDocument({
+            data: typedarray,
+            password: decryptionPassword || undefined
+          }).promise;
           let fullText = '';
 
           for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
@@ -37,20 +40,29 @@ const NotepadViewer = ({ file }) => {
             const textContent = await page.getTextContent();
             
             let lastY = -1;
+            let lastX = -1;
             let pageText = '';
 
             for (const item of textContent.items) {
-              // The transform array contains [scaleX, skewY, skewX, scaleY, translateX, translateY]
-              // translateY (index 5) tells us the vertical position of the text
               const currentY = item.transform[5];
+              const currentX = item.transform[4];
+              const fontSize = Math.abs(item.transform[0]);
               
-              // If the Y coordinate changes significantly, we assume it's a new line!
-              if (lastY !== -1 && Math.abs(currentY - lastY) > 5) {
+              if (lastY !== -1 && Math.abs(currentY - lastY) > 6) {
                 pageText += '\n';
+                if (lastX !== -1 && currentX - lastX > 25) {
+                  pageText += '  '; // Indent detection
+                }
+              }
+              
+              // Header detection: large text at the start of a line
+              if ((lastY === -1 || Math.abs(currentY - lastY) > 6) && fontSize > 16 && item.str.trim()) {
+                pageText += fontSize > 20 ? '# ' : '## ';
               }
               
               pageText += item.str;
               lastY = currentY;
+              lastX = currentX;
             }
             
             fullText += pageText + '\n\n--- Page ' + pageNum + ' ---\n\n';
@@ -86,9 +98,9 @@ const NotepadViewer = ({ file }) => {
   }, [extractedText]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100vh', padding: '2rem', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100vh', padding: '2rem', backgroundColor: 'var(--bg-primary)', boxSizing: 'border-box' }}>
       {isLoading ? (
-        <p style={{ color: 'black', textAlign: 'center', width: '100%', marginTop: '50px' }}>Extracting text into Notepad... Please wait.</p>
+        <p style={{ color: 'var(--text-primary)', textAlign: 'center', width: '100%', marginTop: '50px' }}>Extracting text into Notepad... Please wait.</p>
       ) : (
         <>
           {/* Advanced Notepad Toolbar */}
@@ -110,11 +122,11 @@ const NotepadViewer = ({ file }) => {
               fontSize: '16px',
               fontFamily: 'system-ui, -apple-system, sans-serif',
               lineHeight: '1.6',
-              color: '#1e293b',
-              backgroundColor: 'white',
-              border: 'none',
+              color: 'var(--text-primary)',
+              backgroundColor: 'var(--card-bg)',
+              border: '1px solid var(--glass-border)',
               borderRadius: '8px',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+              boxShadow: 'var(--shadow-md)',
               resize: 'none',
               outline: 'none',
               boxSizing: 'border-box'
@@ -123,14 +135,14 @@ const NotepadViewer = ({ file }) => {
 
           {/* Subscription Modal */}
           {showProModal && (
-            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>
-              <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '16px', maxWidth: '400px', textAlign: 'center', boxShadow: '0 20px 25px rgba(0,0,0,0.2)' }}>
-                <h2 style={{ marginBottom: '15px' }}>Pro Features (Beta)</h2>
-                <p style={{ color: '#666', marginBottom: '30px', lineHeight: '1.5' }}>
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000, backdropFilter: 'blur(3px)' }}>
+              <div style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--glass-border)', padding: '40px', borderRadius: '16px', maxWidth: '400px', textAlign: 'center', boxShadow: 'var(--shadow-lg)' }}>
+                <h2 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Pro Features (Beta)</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '30px', lineHeight: '1.5' }}>
                   The AI Resume Polisher is currently in closed Beta testing to ensure maximum accuracy and performance. Payment gateways will open once Beta testing is complete!
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <button className="action-btn primary" disabled style={{ padding: '15px', fontSize: '16px', cursor: 'not-allowed', opacity: 0.7, backgroundColor: '#cbd5e1', color: '#64748b' }}>
+                  <button className="action-btn primary" disabled style={{ padding: '15px', fontSize: '16px', cursor: 'not-allowed', opacity: 0.5 }}>
                     Join Beta Waitlist (Coming Soon)
                   </button>
                   <button className="action-btn" onClick={() => setShowProModal(false)} style={{ padding: '10px', cursor: 'pointer' }}>
