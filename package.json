@@ -15,6 +15,7 @@
     "form-data": "^4.0.5",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "multer": "^2.1.1",
     "pdf-lib": "latest",
     "pdfjs-dist": "^3.11.174",

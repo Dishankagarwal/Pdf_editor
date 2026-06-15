@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import './LandingPage.css';
 
-const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onInvoiceSelect }) => {
+const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onModeSelect, theme, toggleTheme }) => {
   const singleInputRef = useRef(null);
   const multipleInputRef = useRef(null);
   const currentModeRef = useRef('layout');
@@ -31,7 +31,7 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onInvoiceSelect }) =
 
   const handleToolClick = (tool) => {
     if (tool.type === 'direct') {
-      if (tool.mode === 'invoice') onInvoiceSelect();
+      onModeSelect(tool.mode);
     } else if (tool.type === 'single') {
       handleSingleSelect(tool.mode);
     } else {
@@ -41,6 +41,7 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onInvoiceSelect }) =
 
   const tools = [
     { mode: 'layout', title: 'Layout Editor', desc: 'Add text, images, redactions, signatures, and drawings.', isPro: false, type: 'single' },
+    { mode: 'converter', title: 'Images to PDF', desc: 'Stitch multiple JPG, PNG, and WebP images into a clean PDF document.', isPro: false, type: 'direct' },
     { mode: 'notepad', title: 'AI Notepad', desc: 'Extract raw text and let AI polish your resume instantly.', isPro: true, type: 'single' },
     { mode: 'word', title: 'Convert to Word', desc: 'Extract text and convert directly to an editable Word document.', isPro: false, type: 'single' },
     { mode: 'merge', title: 'Merge PDFs', desc: 'Combine multiple PDF files into one clean document.', isPro: false, type: 'multiple' },
@@ -86,7 +87,16 @@ const LandingPage = ({ onFileSelect, onMultipleFilesSelect, onInvoiceSelect }) =
         </nav>
       </div>
 
-      <div className="landing-content">
+      <div className="landing-content" style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', top: '30px', right: '30px', zIndex: 10 }}>
+          <button 
+            className="action-btn" 
+            onClick={toggleTheme} 
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', padding: '8px 16px' }}
+          >
+            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+          </button>
+        </div>
         <div className="landing-hero">
           <h1 className="hero-title">Welcome to your Workspace</h1>
           <p className="hero-subtitle">Select a highly-optimized utility from the dashboard to begin.</p>

@@ -11,6 +11,7 @@ import LandingPage from './components/LandingPage';
 import { PDFDocument, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.js?url';
+import ConverterViewer from './components/ConverterViewer';
 import './App.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -96,8 +97,9 @@ function App() {
     if (editorMode === 'compress' && file) return <CompressViewer file={file} decryptionPassword={decryptionPassword} />;
     if (editorMode === 'split' && file) return <SplitViewer file={file} decryptionPassword={decryptionPassword} />;
     if (editorMode === 'watermark' && file) return <WatermarkViewer file={file} decryptionPassword={decryptionPassword} />;
+    if (editorMode === 'converter') return <ConverterViewer file={file} decryptionPassword={decryptionPassword} />;
     if (editorMode === 'invoice') return <InvoiceGenerator onGoHome={goHome} />;
-    return <LandingPage onFileSelect={handleSingleFileSelect} onMultipleFilesSelect={handleMultipleFilesSelect} onInvoiceSelect={() => setEditorMode('invoice')} theme={theme} toggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} />;
+    return <LandingPage onFileSelect={handleSingleFileSelect} onMultipleFilesSelect={handleMultipleFilesSelect} onModeSelect={setEditorMode} theme={theme} toggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} />;
   };
 
   return (
@@ -111,7 +113,7 @@ function App() {
             </span>
           </div>
 
-          {file && !['merge', 'compress', 'split', 'watermark'].includes(editorMode) && (
+          {file && !['merge', 'compress', 'split', 'watermark', 'organize', 'converter', 'headerfooter', 'metadata'].includes(editorMode) && (
             <div style={{ display: 'flex', gap: '5px', background: 'var(--glass-border)', padding: '4px', borderRadius: '8px' }}>
               <button 
                 className={`action-btn ${editorMode === 'layout' ? 'primary' : ''}`}

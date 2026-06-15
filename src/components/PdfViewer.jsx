@@ -4,6 +4,10 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.js?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import OrganizeViewer from './OrganizeViewer';
+import ConverterViewer from './ConverterViewer';
+import HeaderFooterViewer from './HeaderFooterViewer';
+import MetadataViewer from './MetadataViewer';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -275,6 +279,7 @@ const PdfViewer = ({ file, decryptionPassword }) => {
   const [penColor, setPenColor] = useState('#4f46e5');
   const drawCanvasRef = useRef(null);
   const drawingHistoryRef = useRef([]);
+  const [activeModal, setActiveModal] = useState(null);
 
   useEffect(() => {
     if (isDrawingMode && drawCanvasRef.current && containerRef.current) {
@@ -462,6 +467,11 @@ const PdfViewer = ({ file, decryptionPassword }) => {
         )}
         <button className="action-btn" onClick={() => addElement('redaction')} style={{ backgroundColor: '#0f172a', color: 'white', border: 'none' }}>+ Redaction</button>
         <button className="action-btn" onClick={() => addElement('signature')} style={{ backgroundColor: 'var(--card-bg)', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)' }}>+ Signature</button>
+        <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--glass-border)', margin: '0 8px' }} />
+        <button className="action-btn" onClick={() => setActiveModal('organize')}>🗂️ Organize Pages</button>
+        <button className="action-btn" onClick={() => setActiveModal('headerfooter')}>🔢 Headers & Footers</button>
+        <button className="action-btn" onClick={() => setActiveModal('metadata')}>ℹ️ Edit Metadata</button>
+        <button className="action-btn" onClick={() => setActiveModal('pdf2img')}>📷 Export to Images</button>
       </div>
 
       {/* Editing hint banner */}
@@ -516,8 +526,66 @@ const PdfViewer = ({ file, decryptionPassword }) => {
           
         </div>
       </div>
+      
+      {activeModal && (
+        <div style={modalOverlayStyle} onClick={() => setActiveModal(null)}>
+          <div style={modalContentStyle} onClick={e => e.stopPropagation()}>
+            <button style={modalCloseBtnStyle} onClick={() => setActiveModal(null)}>×</button>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {activeModal === 'organize' && <OrganizeViewer file={file} decryptionPassword={decryptionPassword} />}
+              {activeModal === 'headerfooter' && <HeaderFooterViewer file={file} decryptionPassword={decryptionPassword} />}
+              {activeModal === 'metadata' && <MetadataViewer file={file} decryptionPassword={decryptionPassword} />}
+              {activeModal === 'pdf2img' && <ConverterViewer file={file} decryptionPassword={decryptionPassword} />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+};
+
+const modalOverlayStyle = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  zIndex: 10000,
+  backdropFilter: 'blur(8px)',
+  padding: '40px',
+  boxSizing: 'border-box'
+};
+
+const modalContentStyle = {
+  backgroundColor: 'var(--bg-primary)',
+  borderRadius: '16px',
+  width: '95%',
+  maxWidth: '1200px',
+  height: '90vh',
+  display: 'flex',
+  flexDirection: 'column',
+  position: 'relative',
+  border: '1px solid var(--glass-border)',
+  boxShadow: 'var(--shadow-lg)',
+  overflow: 'hidden'
+};
+
+const modalCloseBtnStyle = {
+  position: 'absolute',
+  top: '15px',
+  right: '25px',
+  background: 'transparent',
+  border: 'none',
+  fontSize: '28px',
+  color: 'var(--text-primary)',
+  cursor: 'pointer',
+  zIndex: 10001,
+  fontWeight: 'bold',
+  transition: 'transform 0.2s ease'
 };
 
 export default PdfViewer;
