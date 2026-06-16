@@ -104,12 +104,12 @@ function App() {
 
   return (
     <div className="app-container">
-      { (file || mergeFiles.length > 0) && (
+      { (file || mergeFiles.length > 0 || ['invoice', 'converter'].includes(editorMode)) && (
         <div className="toolbar">
           <div className="toolbar-left">
             <span style={{ fontWeight: '600' }}>Editing: </span>
             <span style={{ color: 'var(--text-secondary)', marginLeft: '10px' }}>
-              {file ? file.name : `${mergeFiles.length} files selected`}
+              {file ? file.name : mergeFiles.length > 0 ? `${mergeFiles.length} files selected` : editorMode === 'invoice' ? 'Invoice Builder' : 'Images to PDF'}
             </span>
           </div>
 
