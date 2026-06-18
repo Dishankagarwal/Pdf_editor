@@ -11,6 +11,38 @@ import MetadataViewer from './MetadataViewer';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
+const getDistanceToSegment = (px, py, x1, y1, x2, y2) => {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(px - x1, py - y1);
+  }
+  let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  const closestX = x1 + t * dx;
+  const closestY = y1 + t * dy;
+  return Math.hypot(px - closestX, py - closestY);
+};
+
+const getDistanceToStroke = (px, py, stroke) => {
+  let minDistance = Infinity;
+  for (let i = 0; i < stroke.points.length - 1; i++) {
+    const p1 = stroke.points[i];
+    const p2 = stroke.points[i + 1];
+    const dist = getDistanceToSegment(px, py, p1.x, p1.y, p2.x, p2.y);
+    if (dist < minDistance) {
+      minDistance = dist;
+    }
+  }
+  if (stroke.points.length === 1) {
+    const dist = Math.hypot(px - stroke.points[0].x, py - stroke.points[0].y);
+    if (dist < minDistance) {
+      minDistance = dist;
+    }
+  }
+  return minDistance;
+};
+
 // ---------------------------------------------------------------------------
 // PdfPage — Renders one page with Canvas (visible) + Click-to-Edit text layer
 // ---------------------------------------------------------------------------
@@ -168,7 +200,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
 // ---------------------------------------------------------------------------
 // DraggableItem — Floating overlay elements (text box, image, redaction, sig)
 // ---------------------------------------------------------------------------
-const DraggableItem = ({ el, id, updateElement, deleteElement }) => {
+const DraggableItem = ({ el, id, updateElement, deleteElement, onFocus }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [pos, setPos] = useState({ x: el.x || 100, y: el.y || 100 });
@@ -203,6 +235,7 @@ const DraggableItem = ({ el, id, updateElement, deleteElement }) => {
   return (
     <div
       tabIndex={0}
+      onFocus={onFocus}
       style={{ 
         position: 'absolute', 
         left: pos.x, 
@@ -277,64 +310,234 @@ const PdfViewer = ({ file, decryptionPassword }) => {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [penColor, setPenColor] = useState('#4f46e5');
+  const [penWidth, setPenWidth] = useState(4);
   const drawCanvasRef = useRef(null);
-  const drawingHistoryRef = useRef([]);
+  const [strokes, setStrokes] = useState([]);
+  const [drawingTool, setDrawingTool] = useState('pen'); // 'pen' | 'select'
+  const [selectedStrokeId, setSelectedStrokeId] = useState(null);
+  const [hoveredStrokeId, setHoveredStrokeId] = useState(null);
   const [activeModal, setActiveModal] = useState(null);
+  const currentPointsRef = useRef([]);
+
+  const redrawCanvas = () => {
+    const canvas = drawCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    strokes.forEach(stroke => {
+      if (stroke.points.length === 0) return;
+      const isSelected = stroke.id === selectedStrokeId;
+      const isHovered = stroke.id === hoveredStrokeId;
+
+      // Draw hover or selection outline glow
+      if (isSelected || isHovered) {
+        ctx.save();
+        if (stroke.points.length === 1) {
+          ctx.fillStyle = isSelected ? 'rgba(79, 70, 229, 0.4)' : 'rgba(79, 70, 229, 0.2)';
+          ctx.beginPath();
+          ctx.arc(stroke.points[0].x, stroke.points[0].y, (stroke.width + 10) / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = isSelected ? 'rgba(79, 70, 229, 0.4)' : 'rgba(79, 70, 229, 0.2)';
+          ctx.lineWidth = stroke.width + 10;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // Draw standard stroke line
+      if (stroke.points.length === 1) {
+        ctx.beginPath();
+        ctx.fillStyle = stroke.color;
+        ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        for (let i = 1; i < stroke.points.length; i++) {
+          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+        }
+        ctx.stroke();
+      }
+
+      // Draw dashed selection rectangle around the selected stroke
+      if (isSelected) {
+        const xs = stroke.points.map(p => p.x);
+        const ys = stroke.points.map(p => p.y);
+        const minX = Math.min(...xs) - 6;
+        const maxX = Math.max(...xs) + 6;
+        const minY = Math.min(...ys) - 6;
+        const maxY = Math.max(...ys) + 6;
+
+        ctx.save();
+        ctx.strokeStyle = '#4f46e5';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+
+        // Selection handle dots
+        ctx.fillStyle = '#4f46e5';
+        const sSize = 5;
+        ctx.fillRect(minX - sSize / 2, minY - sSize / 2, sSize, sSize);
+        ctx.fillRect(maxX - sSize / 2, minY - sSize / 2, sSize, sSize);
+        ctx.fillRect(minX - sSize / 2, maxY - sSize / 2, sSize, sSize);
+        ctx.fillRect(maxX - sSize / 2, maxY - sSize / 2, sSize, sSize);
+        ctx.restore();
+      }
+    });
+  };
 
   useEffect(() => {
-    if (isDrawingMode && drawCanvasRef.current && containerRef.current) {
-        drawCanvasRef.current.width = containerRef.current.clientWidth;
-        drawCanvasRef.current.height = containerRef.current.clientHeight;
+    if (drawCanvasRef.current && containerRef.current) {
+      const canvas = drawCanvasRef.current;
+      const newWidth = containerRef.current.clientWidth;
+      const newHeight = containerRef.current.clientHeight;
+      if (newWidth > 0 && newHeight > 0) {
+        if (canvas.width !== newWidth || canvas.height !== newHeight) {
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+        }
+      }
     }
-  }, [isDrawingMode, numPages, deletedPages]);
+    redrawCanvas();
+  }, [isDrawingMode, numPages, deletedPages, strokes, selectedStrokeId, hoveredStrokeId]);
 
   const startDrawing = (e) => {
     if (!isDrawingMode) return;
-    const ctx = drawCanvasRef.current.getContext('2d');
-    drawingHistoryRef.current.push(ctx.getImageData(0, 0, drawCanvasRef.current.width, drawCanvasRef.current.height));
     const rect = drawCanvasRef.current.getBoundingClientRect();
-    ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-    setIsDrawing(true);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (drawingTool === 'pen') {
+      setIsDrawing(true);
+      currentPointsRef.current = [{ x, y }];
+      const ctx = drawCanvasRef.current.getContext('2d');
+      ctx.beginPath();
+      ctx.fillStyle = penColor;
+      ctx.arc(x, y, penWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (drawingTool === 'select') {
+      if (hoveredStrokeId) {
+        setSelectedStrokeId(hoveredStrokeId);
+      } else {
+        setSelectedStrokeId(null);
+      }
+    }
   };
 
   const draw = (e) => {
-    if (!isDrawing || !isDrawingMode) return;
-    const ctx = drawCanvasRef.current.getContext('2d');
     const rect = drawCanvasRef.current.getBoundingClientRect();
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
-    ctx.strokeStyle = penColor;
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (isDrawingMode && isDrawing && drawingTool === 'pen') {
+      const ctx = drawCanvasRef.current.getContext('2d');
+      const lastPoint = currentPointsRef.current[currentPointsRef.current.length - 1];
+      ctx.beginPath();
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = penWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.moveTo(lastPoint.x, lastPoint.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      currentPointsRef.current.push({ x, y });
+    } else if (isDrawingMode && drawingTool === 'select') {
+      let minDistance = Infinity;
+      let closestId = null;
+
+      strokes.forEach(stroke => {
+        const dist = getDistanceToStroke(x, y, stroke);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestId = stroke.id;
+        }
+      });
+
+      if (minDistance < 12) {
+        setHoveredStrokeId(closestId);
+      } else {
+        setHoveredStrokeId(null);
+      }
+    }
   };
 
   const stopDrawing = () => {
-    if (!isDrawingMode) return;
+    if (isDrawing && currentPointsRef.current.length > 0) {
+      const newStroke = {
+        id: Date.now() + '-' + Math.random(),
+        points: [...currentPointsRef.current],
+        color: penColor,
+        width: penWidth
+      };
+      setStrokes(prev => [...prev, newStroke]);
+      currentPointsRef.current = [];
+    }
     setIsDrawing(false);
   };
 
+  const triggerUndo = () => {
+    setStrokes(prev => {
+      if (prev.length === 0) return prev;
+      return prev.slice(0, -1);
+    });
+    setSelectedStrokeId(null);
+    setHoveredStrokeId(null);
+  };
+
+  const deleteSelectedStroke = () => {
+    if (selectedStrokeId) {
+      setStrokes(prev => prev.filter(s => s.id !== selectedStrokeId));
+      setSelectedStrokeId(null);
+      setHoveredStrokeId(null);
+    }
+  };
+
   useEffect(() => {
-    const handleUndo = (e) => {
-      if (isDrawingMode && (e.key === 'Backspace' || (e.ctrlKey && e.key === 'z'))) {
-        const ctx = drawCanvasRef.current?.getContext('2d');
-        if (!ctx) return;
-        if (drawingHistoryRef.current.length > 0) {
-          const lastState = drawingHistoryRef.current.pop();
-          ctx.putImageData(lastState, 0, 0);
-        } else {
-          ctx.clearRect(0, 0, drawCanvasRef.current.width, drawCanvasRef.current.height);
-        }
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsDrawingMode(false);
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (
+        activeEl.tagName.toLowerCase() === 'input' ||
+        activeEl.tagName.toLowerCase() === 'textarea' ||
+        activeEl.isContentEditable
+      );
+
+      if (isTyping) return;
+
+      if (selectedStrokeId && (e.key === 'Backspace' || e.key === 'Delete')) {
+        deleteSelectedStroke();
+        e.preventDefault();
+      } else if (e.key === 'Backspace' || (e.ctrlKey && e.key === 'z')) {
+        triggerUndo();
       }
     };
-    window.addEventListener('keydown', handleUndo);
-    return () => window.removeEventListener('keydown', handleUndo);
-  }, [isDrawingMode]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStrokeId, strokes]);
 
   const handleDeletePage = (pageNumber) => {
     setDeletedPages([...deletedPages, pageNumber]);
   };
 
   const addElement = (type, extra = {}) => {
+    setIsDrawingMode(false);
     setFloatingElements([...floatingElements, { id: Date.now(), type, x: 100, y: window.scrollY + 100, ...extra }]);
   };
 
@@ -459,19 +662,82 @@ const PdfViewer = ({ file, decryptionPassword }) => {
         <button className="action-btn" onClick={() => addElement('text')}>+ Text Box</button>
         <button className="action-btn" onClick={() => imageInputRef.current?.click()}>+ Image</button>
         <input type="file" accept="image/*" ref={imageInputRef} onChange={handleImageUpload} style={{ display: 'none' }} />
-        <button className="action-btn" onClick={() => setIsDrawingMode(!isDrawingMode)} style={{ backgroundColor: isDrawingMode ? 'var(--brand-primary)' : 'var(--card-bg)', color: isDrawingMode ? 'white' : 'inherit' }}>
-          {isDrawingMode ? 'Stop Drawing' : 'Draw (Pen)'}
+        <button 
+          className="action-btn" 
+          onClick={() => setIsDrawingMode(!isDrawingMode)} 
+          style={{ backgroundColor: isDrawingMode ? 'var(--brand-primary)' : 'var(--card-bg)', color: isDrawingMode ? 'white' : 'inherit' }}
+        >
+          {isDrawingMode ? '🎨 Close Drawing Panel' : '✏️ Draw (Pen)'}
+        </button>
+        <button 
+          className="action-btn" 
+          onClick={triggerUndo} 
+          disabled={strokes.length === 0}
+          style={{ opacity: strokes.length === 0 ? 0.5 : 1, cursor: strokes.length === 0 ? 'not-allowed' : 'pointer' }}
+          title="Undo last drawing stroke"
+        >
+          ↩️ Undo
         </button>
         {isDrawingMode && (
-          <input type="color" value={penColor} onChange={(e) => setPenColor(e.target.value)} style={{ padding: '0', border: 'none', width: '30px', height: '30px', borderRadius: '4px', cursor: 'pointer', background: 'transparent' }} title="Pen Color" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--glass-border)' }}>
+            <button 
+              className="action-btn" 
+              onClick={() => { setDrawingTool('pen'); setSelectedStrokeId(null); }}
+              style={{ backgroundColor: drawingTool === 'pen' ? 'var(--brand-primary)' : 'transparent', color: drawingTool === 'pen' ? 'white' : 'inherit', border: drawingTool === 'pen' ? 'none' : '1px solid var(--glass-border)', padding: '4px 8px', fontSize: '13px' }}
+            >
+              ✏️ Draw
+            </button>
+            <button 
+              className="action-btn" 
+              onClick={() => setDrawingTool('select')}
+              style={{ backgroundColor: drawingTool === 'select' ? 'var(--brand-primary)' : 'transparent', color: drawingTool === 'select' ? 'white' : 'inherit', border: drawingTool === 'select' ? 'none' : '1px solid var(--glass-border)', padding: '4px 8px', fontSize: '13px' }}
+            >
+              👆 Select Stroke
+            </button>
+            
+            {drawingTool === 'pen' && (
+              <>
+                <input type="color" value={penColor} onChange={(e) => setPenColor(e.target.value)} style={{ padding: '0', border: 'none', width: '24px', height: '24px', borderRadius: '4px', cursor: 'pointer', background: 'transparent' }} title="Pen Color" />
+                <select 
+                  value={penWidth} 
+                  onChange={(e) => setPenWidth(Number(e.target.value))}
+                  style={{ background: 'var(--card-bg)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)', borderRadius: '4px', padding: '2px 4px', fontSize: '12px', cursor: 'pointer' }}
+                >
+                  <option value={2}>Thin (2px)</option>
+                  <option value={4}>Medium (4px)</option>
+                  <option value={6}>Thick (6px)</option>
+                  <option value={10}>Extra Thick (10px)</option>
+                </select>
+              </>
+            )}
+            
+            {selectedStrokeId && (
+              <button 
+                className="action-btn" 
+                onClick={deleteSelectedStroke}
+                style={{ backgroundColor: 'red', color: 'white', border: 'none', padding: '4px 8px', fontSize: '13px' }}
+              >
+                🗑️ Delete Selected
+              </button>
+            )}
+            
+            <button 
+              className="action-btn" 
+              onClick={() => { if (window.confirm("Clear all drawings?")) setStrokes([]); }}
+              style={{ padding: '4px 8px', fontSize: '13px', opacity: strokes.length === 0 ? 0.5 : 1 }}
+              disabled={strokes.length === 0}
+            >
+              🧹 Clear All
+            </button>
+          </div>
         )}
         <button className="action-btn" onClick={() => addElement('redaction')} style={{ backgroundColor: '#0f172a', color: 'white', border: 'none' }}>+ Redaction</button>
         <button className="action-btn" onClick={() => addElement('signature')} style={{ backgroundColor: 'var(--card-bg)', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)' }}>+ Signature</button>
         <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--glass-border)', margin: '0 8px' }} />
-        <button className="action-btn" onClick={() => setActiveModal('organize')}>🗂️ Organize Pages</button>
-        <button className="action-btn" onClick={() => setActiveModal('headerfooter')}>🔢 Headers & Footers</button>
-        <button className="action-btn" onClick={() => setActiveModal('metadata')}>ℹ️ Edit Metadata</button>
-        <button className="action-btn" onClick={() => setActiveModal('pdf2img')}>📷 Export to Images</button>
+        <button className="action-btn" onClick={() => { setIsDrawingMode(false); setActiveModal('organize'); }}>🗂️ Organize Pages</button>
+        <button className="action-btn" onClick={() => { setIsDrawingMode(false); setActiveModal('headerfooter'); }}>🔢 Headers & Footers</button>
+        <button className="action-btn" onClick={() => { setIsDrawingMode(false); setActiveModal('metadata'); }}>ℹ️ Edit Metadata</button>
+        <button className="action-btn" onClick={() => { setIsDrawingMode(false); setActiveModal('pdf2img'); }}>📷 Export to Images</button>
       </div>
 
       {/* Editing hint banner */}
@@ -496,7 +762,14 @@ const PdfViewer = ({ file, decryptionPassword }) => {
           {/* Pen Tool Canvas Overlay */}
           <canvas 
             ref={drawCanvasRef} 
-            style={{ position: 'absolute', top: 0, left: 0, zIndex: 90, pointerEvents: isDrawingMode ? 'auto' : 'none' }} 
+            style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              zIndex: 90, 
+              pointerEvents: isDrawingMode ? 'auto' : 'none',
+              cursor: isDrawingMode ? (drawingTool === 'select' ? (hoveredStrokeId ? 'pointer' : 'default') : 'crosshair') : 'default'
+            }} 
             onMouseDown={startDrawing}
             onMouseMove={draw}
             onMouseUp={stopDrawing}
@@ -521,7 +794,7 @@ const PdfViewer = ({ file, decryptionPassword }) => {
 
           {/* Render Custom Floating Elements */}
           {floatingElements.map(el => (
-            <DraggableItem key={el.id} el={el} id={el.id} updateElement={updateElement} deleteElement={deleteElement} />
+            <DraggableItem key={el.id} el={el} id={el.id} updateElement={updateElement} deleteElement={deleteElement} onFocus={() => setIsDrawingMode(false)} />
           ))}
           
         </div>
