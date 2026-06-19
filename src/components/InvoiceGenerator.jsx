@@ -185,6 +185,78 @@ const InvoiceGenerator = ({ onGoHome }) => {
     setSelectedDraftId('');
   };
 
+  const handleExportJSON = () => {
+    const data = {
+      invoiceNumber,
+      invoiceDate,
+      dueDate,
+      currency,
+      template,
+      companyName,
+      companyAddress,
+      companyEmail,
+      companyGst,
+      logo,
+      clientName,
+      clientAddress,
+      clientEmail,
+      clientGst,
+      items,
+      taxRate,
+      discount,
+      notes,
+      customSections,
+    };
+    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', jsonString);
+    downloadAnchor.setAttribute('download', `Invoice_${invoiceNumber || 'draft'}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportJSON = (e) => {
+    const fileReader = new FileReader();
+    const file = e.target.files[0];
+    if (!file) return;
+
+    fileReader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        if (parsed.items && Array.isArray(parsed.items)) {
+          setInvoiceNumber(parsed.invoiceNumber || '');
+          setInvoiceDate(parsed.invoiceDate || new Date().toISOString().slice(0, 10));
+          setDueDate(parsed.dueDate || '');
+          setCurrency(parsed.currency || 'USD');
+          setTemplate(parsed.template || 'indigo');
+          setCompanyName(parsed.companyName || '');
+          setCompanyAddress(parsed.companyAddress || '');
+          setCompanyEmail(parsed.companyEmail || '');
+          setCompanyGst(parsed.companyGst || '');
+          setLogo(parsed.logo || null);
+          setClientName(parsed.clientName || '');
+          setClientAddress(parsed.clientAddress || '');
+          setClientEmail(parsed.clientEmail || '');
+          setClientGst(parsed.clientGst || '');
+          setItems(parsed.items);
+          setTaxRate(parsed.taxRate || 0);
+          setDiscount(parsed.discount || 0);
+          setNotes(parsed.notes || '');
+          setCustomSections(parsed.customSections || []);
+          alert('Invoice imported successfully!');
+        } else {
+          alert('Invalid invoice template format.');
+        }
+      } catch (err) {
+        alert('Failed to parse file: ' + err.message);
+      }
+    };
+    fileReader.readAsText(file);
+    e.target.value = '';
+  };
+
+
   // --- Custom Section Handlers ---
   const addCustomSection = (type) => {
     if (type === 'text') setCustomSections(prev => [...prev, emptyTextSection()]);
@@ -417,6 +489,49 @@ const InvoiceGenerator = ({ onGoHome }) => {
             >
               💾 Save Current as Draft
             </button>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button
+                onClick={handleExportJSON}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--glass-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--text-primary)',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontFamily: "'Inter', sans-serif"
+                }}
+              >
+                📤 Export JSON
+              </button>
+              <label
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--glass-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--text-primary)',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  textAlign: 'center',
+                  fontFamily: "'Inter', sans-serif",
+                  boxSizing: 'border-box'
+                }}
+              >
+                📥 Import JSON
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportJSON}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            </div>
           </div>
 
           {/* Template Selector */}

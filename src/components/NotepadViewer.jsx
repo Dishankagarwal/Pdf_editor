@@ -1,12 +1,77 @@
 import React, { useEffect, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { jsPDF } from 'jspdf';
+import Tesseract from 'tesseract.js';
+
 
 const NotepadViewer = ({ file, decryptionPassword }) => {
   const [extractedText, setExtractedText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showProModal, setShowProModal] = useState(false);
   const [isPolishing, setIsPolishing] = useState(false);
+  const [isScannedPdf, setIsScannedPdf] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState('');
+  const [isOcrRunning, setIsOcrRunning] = useState(false);
+
+  const runOcr = async () => {
+    setIsOcrRunning(true);
+    setOcrProgress('Initializing Tesseract OCR Engine...');
+    
+    try {
+      const fileReader = new FileReader();
+      fileReader.onload = async function() {
+        const typedarray = new Uint8Array(this.result);
+        try {
+          const doc = await pdfjsLib.getDocument({
+            data: typedarray,
+            password: decryptionPassword || undefined
+          }).promise;
+          
+          let combinedText = '';
+
+          for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+            setOcrProgress(`Reading page ${pageNum} of ${doc.numPages}...`);
+            const page = await doc.getPage(pageNum);
+            
+            // Render to hidden canvas at scale 2.0 for higher OCR accuracy
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            
+            // Run Tesseract recognition
+            const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
+              logger: m => {
+                if (m.status === 'recognizing text') {
+                  setOcrProgress(`Scanning Page ${pageNum} of ${doc.numPages} (${Math.round(m.progress * 100)}%)...`);
+                }
+              }
+            });
+            
+            combinedText += text + `\n\n--- Page ${pageNum} ---\n\n`;
+          }
+
+          setExtractedText(combinedText.trim());
+          setIsScannedPdf(false);
+        } catch (err) {
+          console.error('OCR failed:', err);
+          alert('OCR failed: ' + err.message);
+        } finally {
+          setIsOcrRunning(false);
+          setOcrProgress('');
+        }
+      };
+      fileReader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to read PDF file.');
+      setIsOcrRunning(false);
+      setOcrProgress('');
+    }
+  };
 
   const simulateProUpgrade = () => {
     setIsPolishing(true);
@@ -69,6 +134,8 @@ const NotepadViewer = ({ file, decryptionPassword }) => {
           }
 
           setExtractedText(fullText.trim());
+          const isTextEmpty = fullText.replace(/--- Page \d+ ---/g, '').trim().length === 0;
+          setIsScannedPdf(isTextEmpty);
         } catch (error) {
           console.error("Error extracting text", error);
           setExtractedText('Error extracting text from PDF.');
@@ -103,9 +170,52 @@ const NotepadViewer = ({ file, decryptionPassword }) => {
         <p style={{ color: 'var(--text-primary)', textAlign: 'center', width: '100%', marginTop: '50px' }}>Extracting text into Notepad... Please wait.</p>
       ) : (
         <>
+          {/* Scanned PDF warning banner */}
+          {isScannedPdf && !isOcrRunning && (
+            <div style={{
+              backgroundColor: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid #f59e0b',
+              padding: '20px',
+              borderRadius: '8px',
+              marginBottom: '20px',
+              textAlign: 'left'
+            }}>
+              <h3 style={{ color: '#f59e0b', margin: '0 0 8px 0', fontSize: '16px', fontWeight: 'bold' }}>⚠️ Scanned PDF / Image-Only File Detected</h3>
+              <p style={{ color: 'var(--text-secondary)', margin: '0 0 16px 0', fontSize: '13px', lineHeight: '1.5' }}>
+                This PDF appears to be a scanned document or contains only images, as no selectable text could be extracted.
+                You can run client-side OCR (Optical Character Recognition) to scan and extract the text from the images.
+              </p>
+              <button className="action-btn primary" onClick={runOcr} style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', cursor: 'pointer' }}>
+                🔍 Run OCR on PDF
+              </button>
+            </div>
+          )}
+
+          {/* OCR running progress */}
+          {isOcrRunning && (
+            <div style={{
+              backgroundColor: 'rgba(99, 102, 241, 0.08)',
+              border: '1px solid var(--brand-primary)',
+              padding: '25px',
+              borderRadius: '8px',
+              marginBottom: '20px',
+              textAlign: 'center'
+            }}>
+              <span style={{ fontSize: '24px', display: 'inline-block', marginBottom: '10px' }}>⏳</span>
+              <h3 style={{ color: 'var(--text-primary)', margin: '0 0 8px 0', fontSize: '16px', fontWeight: 'bold' }}>Running OCR Scanning</h3>
+              <p style={{ color: 'var(--text-secondary)', margin: '0 0 16px 0', fontSize: '13px' }}>
+                {ocrProgress || 'Initializing Tesseract OCR Engine...'}
+              </p>
+              <div style={{ width: '100%', height: '8px', backgroundColor: 'var(--glass-border)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: '100%', backgroundColor: 'var(--brand-primary)', animation: 'ocrPulse 1.5s ease-in-out infinite' }} />
+              </div>
+              <style>{`@keyframes ocrPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+            </div>
+          )}
+
           {/* Advanced Notepad Toolbar */}
           <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-            <button className="action-btn" onClick={() => setShowProModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #f472b6)', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>
+            <button className="action-btn" onClick={() => setShowProModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #f472b6)', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }} disabled={isOcrRunning}>
               {isPolishing ? 'Polishing...' : 'AI Polish (Pro)'}
             </button>
           </div>

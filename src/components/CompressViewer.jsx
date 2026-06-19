@@ -1,6 +1,45 @@
 import React, { useState } from 'react';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFRawStream, PDFName, PDFNumber } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+
+const compressJpegBytes = (uint8Array, scale, quality) => {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([uint8Array], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((resultBlob) => {
+        if (!resultBlob) {
+          reject(new Error('Canvas toBlob failed'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve({
+            bytes: new Uint8Array(reader.result),
+            width: w,
+            height: h
+          });
+        };
+        reader.readAsArrayBuffer(resultBlob);
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image from bytes: ' + e.message));
+    };
+    img.src = url;
+  });
+};
+
 
 const CompressViewer = ({ file, decryptionPassword }) => {
   const [isCompressing, setIsCompressing] = useState(false);
@@ -66,6 +105,47 @@ const CompressViewer = ({ file, decryptionPassword }) => {
     return await newPdf.save();
   };
 
+  const compressImages = async () => {
+    const fileBuffer = await file.arrayBuffer();
+    const pdfDoc = await PDFDocument.load(fileBuffer, { password: decryptionPassword || undefined });
+    const objects = pdfDoc.context.enumerateIndirectObjects();
+    const imagePromises = [];
+
+    const settings = qualitySettings[quality];
+    const scale = settings.scale;
+    const jpegQuality = settings.jpegQuality;
+
+    objects.forEach(([ref, pdfObject]) => {
+      if (pdfObject instanceof PDFRawStream) {
+        const dict = pdfObject.dict;
+        const subtype = dict.lookupMaybe(PDFName.of('Subtype'));
+        if (subtype?.name === 'Image') {
+          const filter = dict.lookupMaybe(PDFName.of('Filter'));
+          if (filter?.name === 'DCTDecode') {
+            const rawBytes = pdfObject.contents;
+            const promise = compressJpegBytes(rawBytes, scale, jpegQuality)
+              .then(({ bytes, width, height }) => {
+                pdfObject.contents = bytes;
+                dict.set(PDFName.of('Length'), PDFNumber.of(bytes.length));
+                dict.set(PDFName.of('Width'), PDFNumber.of(width));
+                dict.set(PDFName.of('Height'), PDFNumber.of(height));
+              })
+              .catch(err => {
+                console.warn('Failed to compress image object:', ref, err.message);
+              });
+            imagePromises.push(promise);
+          }
+        }
+      }
+    });
+
+    if (imagePromises.length > 0) {
+      await Promise.all(imagePromises);
+    }
+    
+    return await pdfDoc.save();
+  };
+
   const handleCompress = async () => {
     setIsCompressing(true);
     setError(null);
@@ -77,6 +157,8 @@ const CompressViewer = ({ file, decryptionPassword }) => {
 
       if (mode === 'structure') {
         compressedBytes = await compressStructure();
+      } else if (mode === 'optimized') {
+        compressedBytes = await compressImages();
       } else {
         compressedBytes = await compressAggressive();
       }
@@ -129,10 +211,13 @@ const CompressViewer = ({ file, decryptionPassword }) => {
         {!result && !isCompressing && !error && (
           <>
             <div style={{ display: 'flex', gap: '4px', background: 'var(--glass-border)', padding: '4px', borderRadius: '8px', marginBottom: '24px' }}>
-              <button onClick={() => setMode('structure')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', fontFamily: "'Inter', sans-serif", background: mode === 'structure' ? 'var(--brand-primary)' : 'transparent', color: mode === 'structure' ? 'white' : 'var(--text-secondary)' }}>
+              <button onClick={() => setMode('structure')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', fontFamily: "'Inter', sans-serif", background: mode === 'structure' ? 'var(--brand-primary)' : 'transparent', color: mode === 'structure' ? 'white' : 'var(--text-secondary)' }}>
                 🔧 Structure
               </button>
-              <button onClick={() => setMode('aggressive')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', fontFamily: "'Inter', sans-serif", background: mode === 'aggressive' ? 'var(--brand-primary)' : 'transparent', color: mode === 'aggressive' ? 'white' : 'var(--text-secondary)' }}>
+              <button onClick={() => setMode('optimized')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', fontFamily: "'Inter', sans-serif", background: mode === 'optimized' ? 'var(--brand-primary)' : 'transparent', color: mode === 'optimized' ? 'white' : 'var(--text-secondary)' }}>
+                🖼️ Optimized Images
+              </button>
+              <button onClick={() => setMode('aggressive')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', fontFamily: "'Inter', sans-serif", background: mode === 'aggressive' ? 'var(--brand-primary)' : 'transparent', color: mode === 'aggressive' ? 'white' : 'var(--text-secondary)' }}>
                 🔥 Aggressive
               </button>
             </div>
@@ -145,6 +230,36 @@ const CompressViewer = ({ file, decryptionPassword }) => {
               </div>
             )}
 
+            {mode === 'optimized' && (
+              <>
+                <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.08)', padding: '14px', borderRadius: '10px', marginBottom: '20px', textAlign: 'left' }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0, lineHeight: '1.5' }}>
+                    ⚡ Downscales only embedded images to reduce size. <strong style={{ color: 'var(--text-primary)' }}>All text remains fully selectable and searchable.</strong>
+                  </p>
+                </div>
+
+                {/* Quality selector */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textAlign: 'left', marginBottom: '4px' }}>Target Image Quality</label>
+                  {Object.entries(qualitySettings).map(([key, val]) => (
+                    <label key={key} style={{
+                      display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px',
+                      border: quality === key ? '2px solid var(--brand-primary)' : '1px solid var(--glass-border)',
+                      borderRadius: '10px', cursor: 'pointer',
+                      background: quality === key ? 'rgba(99, 102, 241, 0.06)' : 'var(--bg-primary)',
+                    }}>
+                      <input type="radio" name="quality" checked={quality === key} onChange={() => setQuality(key)}
+                        style={{ accentColor: 'var(--brand-primary)' }} />
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: '600', fontSize: '14px', textTransform: 'capitalize' }}>{key}</div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{val.label}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
             {mode === 'aggressive' && (
               <>
                 <div style={{ backgroundColor: 'rgba(245, 158, 11, 0.08)', padding: '14px', borderRadius: '10px', marginBottom: '20px', textAlign: 'left' }}>
@@ -155,6 +270,7 @@ const CompressViewer = ({ file, decryptionPassword }) => {
 
                 {/* Quality selector */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textAlign: 'left', marginBottom: '4px' }}>Target Image Quality</label>
                   {Object.entries(qualitySettings).map(([key, val]) => (
                     <label key={key} style={{
                       display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px',

@@ -34,6 +34,61 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    let title = "Ultimate PDF Suite | Free Online Editor, Organizer, Converter & PDF Tools";
+    let desc = "A premium, 100% free PDF utility suite. Edit layouts, organize & rotate pages, convert PDF to images, stitch images to PDF, add running page numbers, edit metadata, compress, split, merge, and watermark pages securely in your browser.";
+
+    const hasFile = !!file;
+
+    if (editorMode === 'invoice') {
+      title = "Free Invoice Generator - Custom Invoice Maker | Ultimate PDF Suite";
+      desc = "Create beautiful, professional invoices in seconds. Customize templates, line items, and currencies, and download as PDF instantly.";
+    } else if (editorMode === 'converter') {
+      title = "Images to PDF - Convert JPG, PNG to PDF Online | Ultimate PDF Suite";
+      desc = "Stitch multiple JPG, PNG, and WebP images together into a clean, unified PDF document with custom page sizes and margins.";
+    } else if (hasFile) {
+      switch (editorMode) {
+        case 'layout':
+          title = "Layout Editor - Edit PDF Text & Annotate Online | Ultimate PDF Suite";
+          desc = "Add custom text, drawings, signatures, and redactions over pages in your PDF. Lock documents with password encryption.";
+          break;
+        case 'notepad':
+          title = "OCR PDF & AI Notepad - Extract Text from Scanned PDFs | Ultimate PDF Suite";
+          desc = "Extract raw text from PDF files using client-side OCR, edit them directly in a notepad workspace, and download as a new PDF.";
+          break;
+        case 'word':
+          title = "PDF to Word Converter - Convert PDF to Docx Online | Ultimate PDF Suite";
+          desc = "Extract text and convert directly to an editable Microsoft Word document (.docx) online using high-fidelity conversion.";
+          break;
+        case 'compress':
+          title = "Compress PDF Online - Reduce PDF File Size Free | Ultimate PDF Suite";
+          desc = "Optimize PDF structure or downscale internal images to shrink your PDF file size while keeping all vector layout and text sharp.";
+          break;
+        case 'split':
+          title = "Split PDF - Extract Specific Pages Online | Ultimate PDF Suite";
+          desc = "Extract specific pages from a PDF or split a large document into multiple files instantly using page selection tools.";
+          break;
+        case 'watermark':
+          title = "Add Watermark to PDF - Batch Watermark Online | Ultimate PDF Suite";
+          desc = "Stamp semi-transparent text or image watermarks diagonally across all pages of your PDF simultaneously.";
+          break;
+        default:
+          break;
+      }
+    } else if (mergeFiles.length > 0 && editorMode === 'merge') {
+      title = "Merge PDFs Online - Combine PDF Files Free | Ultimate PDF Suite";
+      desc = "Select and combine multiple PDF files into one clean document. Drag and drop to reorder files before merging.";
+    }
+
+    document.title = title;
+    
+    // Update the description meta tag
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', desc);
+    }
+  }, [editorMode, file, mergeFiles]);
+
   const handleSingleFileSelect = async (selectedFile, mode) => {
     try {
       const fileBuffer = await selectedFile.arrayBuffer();

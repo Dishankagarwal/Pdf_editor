@@ -51,6 +51,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
   const canvasRef = useRef(null);
   const textLayerRef = useRef(null);
   const [page, setPage] = useState(null);
+  const [hasText, setHasText] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -86,6 +87,7 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
 
       // Setup Text Layer (transparent overlay for click-to-edit)
       const textContent = await page.getTextContent();
+      setHasText(textContent.items.length > 0);
       const textLayerDiv = textLayerRef.current;
       textLayerDiv.innerHTML = ''; 
       
@@ -186,8 +188,8 @@ const PdfPage = ({ pdfDoc, pageNumber }) => {
 
   return (
     <div ref={containerRef} style={{ position: 'relative', marginBottom: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backgroundColor: 'white' }}>
-      {/* Canvas is hidden but still renders to provide correct page dimensions */}
-      <canvas ref={canvasRef} style={{ visibility: 'hidden', display: 'block' }} />
+      {/* Canvas is hidden only if page contains text, to prevent text-doubling during editing. For image-only pages, it is visible. */}
+      <canvas ref={canvasRef} style={{ visibility: hasText ? 'hidden' : 'visible', display: 'block' }} />
       <div 
         ref={textLayerRef} 
         className="textLayer" 
