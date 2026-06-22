@@ -2,6 +2,90 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 
+// Split Page Thumbnail component for high-performance lazy rendering
+const SplitPageThumbnail = ({ pdfDoc, pageNumber }) => {
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { rootMargin: '100px' }
+    );
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible || !pdfDoc) return;
+    let active = true;
+    const renderThumb = async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNumber);
+        if (!active) return;
+
+        const viewport = page.getViewport({ scale: 0.35 });
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (active) setLoading(false);
+      } catch (err) {
+        console.error('Split thumbnail render error:', err);
+      }
+    };
+    renderThumb();
+    return () => {
+      active = false;
+    };
+  }, [pdfDoc, pageNumber, isVisible]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        width: '100%', 
+        height: '140px', 
+        background: '#ffffff', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        position: 'relative'
+      }}
+    >
+      {loading && (
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', position: 'absolute' }}>
+          Loading...
+        </span>
+      )}
+      <canvas 
+        ref={canvasRef} 
+        style={{ 
+          maxWidth: '90%', 
+          maxHeight: '90%', 
+          objectFit: 'contain',
+          display: loading ? 'none' : 'block' 
+        }} 
+      />
+    </div>
+  );
+};
+
 const SplitViewer = ({ file, decryptionPassword }) => {
   const [range, setRange] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -9,6 +93,7 @@ const SplitViewer = ({ file, decryptionPassword }) => {
   const [thumbnails, setThumbnails] = useState([]);
   const [selectedPages, setSelectedPages] = useState(new Set());
   const [isLoadingThumbs, setIsLoadingThumbs] = useState(true);
+  const [pdfDocJs, setPdfDocJs] = useState(null);
 
   // Render thumbnails on load
   useEffect(() => {
@@ -23,28 +108,22 @@ const SplitViewer = ({ file, decryptionPassword }) => {
           password: decryptionPassword || undefined
         }).promise;
         setTotalPages(doc.numPages);
+        setPdfDocJs(doc);
 
         const thumbs = [];
         for (let i = 1; i <= doc.numPages; i++) {
-          const page = await doc.getPage(i);
-          const viewport = page.getViewport({ scale: 0.35 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          thumbs.push({ pageNum: i, dataUrl: canvas.toDataURL('image/jpeg', 0.6) });
+          thumbs.push({ pageNum: i });
         }
         setThumbnails(thumbs);
       } catch (err) {
-        console.error('Failed to render thumbnails:', err);
+        console.error('Failed to load document for thumbnails:', err);
       } finally {
         setIsLoadingThumbs(false);
       }
     };
 
     loadThumbnails();
-  }, [file]);
+  }, [file, decryptionPassword]);
 
   // Toggle page selection
   const togglePage = (pageNum) => {
@@ -195,7 +274,9 @@ const SplitViewer = ({ file, decryptionPassword }) => {
                       transform: isSelected ? 'scale(1.03)' : 'scale(1)',
                     }}
                   >
-                    <img src={thumb.dataUrl} alt={`Page ${thumb.pageNum}`} style={{ width: '100%', display: 'block' }} />
+                    {pdfDocJs && (
+                      <SplitPageThumbnail pdfDoc={pdfDocJs} pageNumber={thumb.pageNum} />
+                    )}
                     <div style={{
                       position: 'absolute', bottom: 0, left: 0, right: 0,
                       padding: '4px 0', textAlign: 'center',

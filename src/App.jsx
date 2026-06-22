@@ -1,18 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import PdfViewer from './components/PdfViewer';
-import NotepadViewer from './components/NotepadViewer';
-import WordConverter from './components/WordConverter';
-import MergeViewer from './components/MergeViewer';
-import CompressViewer from './components/CompressViewer';
-import SplitViewer from './components/SplitViewer';
-import WatermarkViewer from './components/WatermarkViewer';
-import InvoiceGenerator from './components/InvoiceGenerator';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import LandingPage from './components/LandingPage';
 import { PDFDocument, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.js?url';
-import ConverterViewer from './components/ConverterViewer';
 import './App.css';
+
+// Lazy load tools components to optimize bundle size and speed up page load
+const PdfViewer = lazy(() => import('./components/PdfViewer'));
+const NotepadViewer = lazy(() => import('./components/NotepadViewer'));
+const WordConverter = lazy(() => import('./components/WordConverter'));
+const MergeViewer = lazy(() => import('./components/MergeViewer'));
+const CompressViewer = lazy(() => import('./components/CompressViewer'));
+const SplitViewer = lazy(() => import('./components/SplitViewer'));
+const WatermarkViewer = lazy(() => import('./components/WatermarkViewer'));
+const InvoiceGenerator = lazy(() => import('./components/InvoiceGenerator'));
+const ConverterViewer = lazy(() => import('./components/ConverterViewer'));
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -66,11 +68,23 @@ function App() {
           break;
         case 'split':
           title = "Split PDF - Extract Specific Pages Online | Ultimate PDF Suite";
-          desc = "Extract specific pages from a PDF or split a large document into multiple files instantly using page selection tools.";
+          desc = "Extract specific pages from a PDF or split a large document instantly using page selection tools.";
           break;
         case 'watermark':
           title = "Add Watermark to PDF - Batch Watermark Online | Ultimate PDF Suite";
           desc = "Stamp semi-transparent text or image watermarks diagonally across all pages of your PDF simultaneously.";
+          break;
+        case 'organize':
+          title = "Organize PDF Pages - Rotate, Delete & Reorder PDF Online | Ultimate PDF Suite";
+          desc = "Rearrange, rotate, delete, duplicate, and insert blank pages in your PDF document visually using client-side organizer tools.";
+          break;
+        case 'headerfooter':
+          title = "Add Page Numbers to PDF - Headers & Footers Online | Ultimate PDF Suite";
+          desc = "Add running page numbers, custom headers, or footers to your PDF documents easily with fully customizable layout settings.";
+          break;
+        case 'metadata':
+          title = "Edit PDF Metadata - Edit Title, Author & Properties Online | Ultimate PDF Suite";
+          desc = "Modify PDF metadata properties such as Title, Author, Subject, Keywords, Creator, and Producer entirely client-side.";
           break;
         default:
           break;
@@ -168,7 +182,7 @@ function App() {
             </span>
           </div>
 
-          {file && !['merge', 'compress', 'split', 'watermark', 'organize', 'converter', 'headerfooter', 'metadata'].includes(editorMode) && (
+          {file && ['layout', 'notepad'].includes(editorMode) && (
             <div style={{ display: 'flex', gap: '5px', background: 'var(--glass-border)', padding: '4px', borderRadius: '8px' }}>
               <button 
                 className={`action-btn ${editorMode === 'layout' ? 'primary' : ''}`}
@@ -213,7 +227,35 @@ function App() {
         </div>
       )}
 
-      {renderActiveViewer()}
+      <Suspense fallback={
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80vh',
+          color: 'var(--text-secondary)'
+        }}>
+          <div style={{
+            border: '4px solid var(--glass-border)',
+            borderTop: '4px solid var(--brand-primary)',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            animation: 'spin 1s linear infinite',
+            marginBottom: '16px'
+          }} />
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+          <span>Loading tool modules...</span>
+        </div>
+      }>
+        {renderActiveViewer()}
+      </Suspense>
 
       {passwordModalOpen && (
         <div style={{

@@ -1,7 +1,66 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import './InvoiceGenerator.css';
+
+// Promise-based IndexedDB utility for large client-side drafts storage
+const DB_NAME = 'InvoiceDraftsDB';
+const STORE_NAME = 'drafts';
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = (e) => resolve(e.target.result);
+    request.onerror = (e) => reject(e.target.error);
+  });
+};
+
+const getDraftsFromDB = async () => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const sorted = (request.result || []).sort((a, b) => b.timestamp - a.timestamp);
+        resolve(sorted);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error('getDraftsFromDB error:', err);
+    return [];
+  }
+};
+
+const saveDraftToDB = async (draft) => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.put(draft);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const deleteDraftFromDB = async (id) => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
 
 const TEMPLATES = [
   { id: 'indigo', name: 'Indigo', color: '#4f46e5' },
@@ -74,15 +133,38 @@ const InvoiceGenerator = ({ onGoHome }) => {
 
   // Drafts State
   const [selectedDraftId, setSelectedDraftId] = useState('');
-  const [drafts, setDrafts] = useState(() => {
-    try {
-      const saved = localStorage.getItem('invoice_drafts');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.error('Failed to parse invoice drafts:', e);
-      return [];
-    }
-  });
+  const [drafts, setDrafts] = useState([]);
+
+  useEffect(() => {
+    const loadAndMigrate = async () => {
+      try {
+        let dbDrafts = await getDraftsFromDB();
+        
+        // Migrate legacy drafts from localStorage if present
+        const legacy = localStorage.getItem('invoice_drafts');
+        if (legacy) {
+          try {
+            const parsed = JSON.parse(legacy);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              for (const draft of parsed) {
+                if (draft && draft.id) {
+                  await saveDraftToDB(draft);
+                }
+              }
+              dbDrafts = await getDraftsFromDB();
+              localStorage.removeItem('invoice_drafts');
+            }
+          } catch (err) {
+            console.error('Failed to migrate legacy drafts:', err);
+          }
+        }
+        setDrafts(dbDrafts);
+      } catch (err) {
+        console.error('Failed to load drafts:', err);
+      }
+    };
+    loadAndMigrate();
+  }, []);
 
   const sheetRef = useRef(null);
   const logoInputRef = useRef(null);
@@ -114,7 +196,7 @@ const InvoiceGenerator = ({ onGoHome }) => {
   };
 
   // --- Draft Handlers ---
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     const draftId = invoiceNumber || 'Draft_' + Date.now();
     const newDraft = {
       id: draftId,
@@ -140,14 +222,16 @@ const InvoiceGenerator = ({ onGoHome }) => {
       timestamp: Date.now()
     };
 
-    setDrafts(prev => {
-      const filtered = prev.filter(d => d.id !== draftId);
-      const updated = [newDraft, ...filtered];
-      localStorage.setItem('invoice_drafts', JSON.stringify(updated));
-      return updated;
-    });
-    setSelectedDraftId(draftId);
-    alert('Draft saved successfully!');
+    try {
+      await saveDraftToDB(newDraft);
+      const updated = await getDraftsFromDB();
+      setDrafts(updated);
+      setSelectedDraftId(draftId);
+      alert('Draft saved successfully to browser DB!');
+    } catch (err) {
+      console.error('Failed to save draft to IndexedDB:', err);
+      alert('Error saving draft: ' + err.message);
+    }
   };
 
   const handleLoadDraft = (draftId) => {
@@ -174,15 +258,19 @@ const InvoiceGenerator = ({ onGoHome }) => {
     setCustomSections(draft.customSections || []);
   };
 
-  const handleDeleteDraft = (draftId) => {
+  const handleDeleteDraft = async (draftId) => {
     if (!draftId) return;
     if (!confirm('Are you sure you want to delete this draft?')) return;
-    setDrafts(prev => {
-      const updated = prev.filter(d => d.id !== draftId);
-      localStorage.setItem('invoice_drafts', JSON.stringify(updated));
-      return updated;
-    });
-    setSelectedDraftId('');
+    try {
+      await deleteDraftFromDB(draftId);
+      const updated = await getDraftsFromDB();
+      setDrafts(updated);
+      setSelectedDraftId('');
+      alert('Draft deleted successfully.');
+    } catch (err) {
+      console.error('Failed to delete draft from IndexedDB:', err);
+      alert('Error deleting draft: ' + err.message);
+    }
   };
 
   const handleExportJSON = () => {

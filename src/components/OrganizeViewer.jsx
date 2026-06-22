@@ -5,9 +5,30 @@ import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 // Page Thumbnail sub-component for high-performance lazy rendering
 const PageThumbnail = ({ pdfDoc, pageNumber, rotation }) => {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { rootMargin: '150px' }
+    );
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
     let active = true;
     const renderThumbnail = async () => {
       setLoading(true);
@@ -34,22 +55,25 @@ const PageThumbnail = ({ pdfDoc, pageNumber, rotation }) => {
     return () => {
       active = false;
     };
-  }, [pdfDoc, pageNumber]);
+  }, [pdfDoc, pageNumber, isVisible]);
 
   return (
-    <div style={{
-      position: 'relative',
-      width: '100%',
-      height: '180px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: '#ffffff',
-      borderRadius: '8px',
-      overflow: 'hidden',
-      border: '1px solid var(--glass-border)',
-      boxShadow: 'var(--shadow-sm)'
-    }}>
+    <div 
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '180px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#ffffff',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        border: '1px solid var(--glass-border)',
+        boxShadow: 'var(--shadow-sm)'
+      }}
+    >
       {loading && (
         <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
           Loading...

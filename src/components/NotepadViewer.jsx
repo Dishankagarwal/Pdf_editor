@@ -42,8 +42,9 @@ const NotepadViewer = ({ file, decryptionPassword }) => {
             
             await page.render({ canvasContext: ctx, viewport }).promise;
             
-            // Run Tesseract recognition
+            // Run Tesseract recognition with local cache to support offline OCR and increase performance
             const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
+              langPath: window.location.origin + '/tessdata',
               logger: m => {
                 if (m.status === 'recognizing text') {
                   setOcrProgress(`Scanning Page ${pageNum} of ${doc.numPages} (${Math.round(m.progress * 100)}%)...`);
